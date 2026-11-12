@@ -1,26 +1,37 @@
 name: render
 on: [push, workflow_dispatch]
+permissions:
+  contents: write
 jobs:
   render:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 5
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+        shard: [0,1,2,3,4,5,6,7,8,9]
     steps:
       - uses: actions/checkout@v4
       - name: Get Blender
         run: |
-          wget -q https://download.blender.org/release/Blender4.2/blender-4.2.3-linux-x64.tar.xz
+          for i in 1 2 3; do
+            wget -q --timeout=60 --tries=3 https://download.blender.org/release/Blender4.2/blender-4.2.3-linux-x64.tar.xz && break
+            echo "retry $i"; sleep 5
+          done
           tar xf blender-4.2.3-linux-x64.tar.xz
           echo "BL=$PWD/blender-4.2.3-linux-x64/blender" >> $GITHUB_ENV
       - name: Render shard
         run: |
-          N=60; S=${{ matrix.shard }}; T=20
+          N=60; S=${{ matrix.shard }}; T=10
           F0=$(( S * N / T )); F1=$(( (S+1) * N / T - 1 ))
           echo "shard $S frames $F0..$F1"
           "$BL" -b -P bargello_anim.py -- anim out 1080 1920 40 $F0 $F1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: frames-${{ matrix.shard }}
-          path: out/*.png
+      - name: Push frames to branch
+        run: |
+          git config user.name ci
+          git config user.email ci@ci
+          git checkout --orphan r${{ matrix.shard }}
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          git add -f out/*.png
+          git commit -qm "frames shard ${{ matrix.shard }}"
+          git push -f origin r${{ matrix.shard }}
